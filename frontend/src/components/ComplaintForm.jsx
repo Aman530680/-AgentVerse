@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-export default function ComplaintForm({ onAnalyze, loading }) {
-  const [complaint, setComplaint] = useState("");
+export default function ComplaintForm({ onAnalyze, loading, initialValue = "" }) {
+  const [complaint, setComplaint] = useState(initialValue);
   const [focused, setFocused] = useState(false);
 
   const handleSubmit = (e) => {

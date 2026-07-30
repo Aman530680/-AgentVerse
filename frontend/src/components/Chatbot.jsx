@@ -1,111 +1,80 @@
 import { useState, useRef, useEffect } from "react";
 
-const SYSTEM_PROMPT = `You are AgentBot, a helpful AI assistant for AgentVerse — an AI-powered banking fraud grievance investigation system.
-
-AgentVerse has 6 AI agents:
-1. 📝 Intake Agent — extracts structured data (amount, bank, fraud type, channel, date) from complaints
-2. 🏷️ Classification Agent — categorizes fraud type and routes to the right department
-3. 🔍 Duplicate Agent — checks if a similar complaint already exists
-4. 📄 Evidence Agent — evaluates evidence completeness and lists missing documents
-5. ⚠️ Risk Agent — scores risk level (0-100) and recommends priority action
-6. 🚦 Workflow Agent — assigns SLA, next steps, and closure status
-
-Answer user questions about how the system works, what each agent does, how to submit complaints, and general banking fraud topics. Be concise, friendly, and helpful. Use emojis occasionally.`;
-
 export default function Chatbot() {
-  const [open, setOpen]       = useState(false);
+  const [open,     setOpen]     = useState(false);
   const [messages, setMessages] = useState([
-    { role: "assistant", content: "👋 Hi! I'm **AgentBot**. Ask me anything about AgentVerse, the 6 AI agents, or banking fraud investigation!" }
+    { role: "assistant", content: "👋 Hi! I'm **AgentBot**. Ask me anything about CasePilot, the 6 AI agents, or fraud complaint intelligence!" }
   ]);
-  const [input, setInput]     = useState("");
+  const [input,   setInput]   = useState("");
   const [loading, setLoading] = useState(false);
-  const [unread, setUnread]   = useState(1);
-  const bottomRef             = useRef(null);
-  const inputRef              = useRef(null);
+  const [unread,  setUnread]  = useState(1);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
 
   useEffect(() => {
-    if (open) {
-      setUnread(0);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (open) { setUnread(0); setTimeout(() => inputRef.current?.focus(), 100); }
   }, [open]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendQuestion = async (q) => {
-    if (loading) return;
-    const userMsg = { role: "user", content: q };
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "system", content: SYSTEM_PROMPT }, userMsg],
-          max_tokens: 400, temperature: 0.7,
-        }),
-      });
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content || "Sorry, try again.";
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Connection error." }]);
-    } finally {
-      setLoading(false);
-    }
+  // ── Call backend /chat ──────────────────────────────────────────────────────
+  const callChat = async (history) => {
+    const res = await fetch("http://127.0.0.1:8000/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.reply;
   };
 
+  // ── Send typed message ──────────────────────────────────────────────────────
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
 
     const userMsg = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
     setInput("");
     setLoading(true);
 
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...messages.filter((m) => m.role !== "system"),
-            userMsg,
-          ],
-          max_tokens: 400,
-          temperature: 0.7,
-        }),
-      });
-
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't get a response. Please try again.";
+      const reply = await callChat(newHistory);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
       if (!open) setUnread((n) => n + 1);
     } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Connection error. Please check your API key in the `.env` file." }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Could not reach the backend. Make sure the server is running on port 8000." }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Send suggested question ─────────────────────────────────────────────────
+  const sendQuestion = async (q) => {
+    if (loading) return;
+    const userMsg = { role: "user", content: q };
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
+    setLoading(true);
+
+    try {
+      const reply = await callChat(newHistory);
+      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Could not reach the backend." }]);
     } finally {
       setLoading(false);
     }
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
-  // Simple markdown bold renderer
   const renderText = (text) =>
     text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
       part.startsWith("**") && part.endsWith("**")
@@ -115,10 +84,10 @@ export default function Chatbot() {
 
   return (
     <>
-      {/* Floating Button */}
+      {/* ── Floating Button ── */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-2xl hover:scale-110 transition-all duration-300 glow-blue"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-2xl hover:scale-110 transition-all duration-300"
         style={{ boxShadow: "0 8px 32px rgba(99,102,241,0.5)" }}
       >
         {open ? (
@@ -135,7 +104,7 @@ export default function Chatbot() {
         )}
       </button>
 
-      {/* Chat Window */}
+      {/* ── Chat Window ── */}
       {open && (
         <div
           className="fixed bottom-24 right-6 z-50 w-[360px] rounded-3xl overflow-hidden animate-bounce-in"
@@ -148,9 +117,7 @@ export default function Chatbot() {
         >
           {/* Header */}
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-4 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-xl animate-float">
-              🤖
-            </div>
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-xl animate-float">🤖</div>
             <div>
               <p className="font-display font-bold text-white text-sm">AgentBot</p>
               <div className="flex items-center gap-1.5">
@@ -159,33 +126,25 @@ export default function Chatbot() {
               </div>
             </div>
             <button
-              onClick={() => setMessages([{ role: "assistant", content: "👋 Hi! I'm **AgentBot**. Ask me anything about AgentVerse or banking fraud!" }])}
+              onClick={() => setMessages([{ role: "assistant", content: "👋 Hi! I'm **AgentBot**. Ask me anything about CasePilot or fraud complaints!" }])}
               className="ml-auto text-white/50 hover:text-white text-xs transition-colors"
-              title="Clear chat"
             >
               Clear
             </button>
           </div>
 
           {/* Messages */}
-          <div className="h-80 overflow-y-auto px-4 py-4 space-y-3 scrollbar-thin">
+          <div className="h-80 overflow-y-auto px-4 py-4 space-y-3">
             {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-up`}
-              >
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-up`}>
                 {msg.role === "assistant" && (
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm mr-2 flex-shrink-0 mt-0.5">
-                    🤖
-                  </div>
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm mr-2 flex-shrink-0 mt-0.5">🤖</div>
                 )}
-                <div
-                  className={`max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-6 ${
-                    msg.role === "user"
-                      ? "bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-br-sm"
-                      : "bg-white/8 text-slate-300 rounded-bl-sm border border-white/8"
-                  }`}
-                >
+                <div className={`max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-6 ${
+                  msg.role === "user"
+                    ? "bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-br-sm"
+                    : "bg-white/8 text-slate-300 rounded-bl-sm border border-white/8"
+                }`}>
                   {renderText(msg.content)}
                 </div>
               </div>
@@ -193,13 +152,11 @@ export default function Chatbot() {
 
             {loading && (
               <div className="flex justify-start animate-fade-in">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm mr-2 flex-shrink-0">
-                  🤖
-                </div>
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm mr-2 flex-shrink-0">🤖</div>
                 <div className="bg-white/8 border border-white/8 px-4 py-3 rounded-2xl rounded-bl-sm flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce"  style={{ animationDelay: "300ms" }} />
                 </div>
               </div>
             )}
@@ -209,7 +166,7 @@ export default function Chatbot() {
           {/* Suggested Questions */}
           {messages.length <= 1 && (
             <div className="px-4 pb-2 flex flex-wrap gap-2">
-              {["What is Intake Agent?", "How does risk scoring work?", "What is AgentVerse?"].map((q) => (
+              {["What is Intake Agent?", "How does risk scoring work?", "What is CasePilot?"].map((q) => (
                 <button
                   key={q}
                   onClick={() => sendQuestion(q)}
@@ -230,9 +187,8 @@ export default function Chatbot() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKey}
-                placeholder="Ask anything about AgentVerse..."
+                placeholder="Ask anything about CasePilot..."
                 className="flex-1 bg-transparent text-slate-200 text-sm placeholder:text-slate-600 resize-none focus:outline-none leading-6 max-h-24 font-mono-jet"
-                style={{ fieldSizing: "content" }}
               />
               <button
                 onClick={sendMessage}
